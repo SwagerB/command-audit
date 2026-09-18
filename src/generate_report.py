@@ -1,14 +1,25 @@
 import os
 import json
 import boto3
+from pathlib import Path
 from datetime import datetime
 
-ENDPOINT = 'http://localhost:4566'
-REGION = 'us-east-1'
-CREDS = dict(aws_access_key_id='test', aws_secret_access_key='test')
-DDB_TABLE = 'AuditLogs'
-REPORT_DIR = '/root/audit_logs/reports'
-S3_BUCKET = 'audit-reports-2026'
+# ============ 路径 ============
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / 'data'
+REPORT_DIR = DATA_DIR / 'reports'
+REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+# ============ AWS 配置 ============
+ENDPOINT = os.getenv('AWS_ENDPOINT_URL', 'http://localhost:4566')
+REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+DDB_TABLE = os.getenv('AUDIT_DDB_TABLE', 'AuditLogs')
+S3_BUCKET = os.getenv('AUDIT_S3_BUCKET', 'audit-reports-2026')
+
+CREDS = dict(
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID', 'test'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY', 'test'),
+)
 
 
 def get_client():
@@ -49,208 +60,56 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 <title>命令审计报告</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-  :root {
-    --bg: #f5f7fa;
-    --card: #ffffff;
-    --text: #1f2d3d;
-    --muted: #7f8c8d;
-    --accent: #3498db;
-    --danger: #e74c3c;
-    --success: #27ae60;
-    --border: #ecf0f1;
-  }
   * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
-    background: var(--bg);
-    margin: 0;
-    padding: 24px;
-    color: var(--text);
-    line-height: 1.5;
-  }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f5f7fa; margin: 0; padding: 24px; color: #1f2d3d; line-height: 1.5; }
   .container { max-width: 1280px; margin: 0 auto; }
-
   header { margin-bottom: 20px; }
   header h1 { font-size: 26px; margin: 0 0 4px; }
-  header .meta { color: var(--muted); font-size: 13px; }
+  header .meta { color: #7f8c8d; font-size: 13px; }
 
-  .tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 20px;
-    border-bottom: 2px solid var(--border);
-  }
-  .tab {
-    padding: 10px 22px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 15px;
-    color: var(--muted);
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    transition: all 0.15s;
-  }
-  .tab:hover { color: var(--accent); }
-  .tab.active {
-    color: var(--accent);
-    font-weight: 600;
-    border-bottom-color: var(--accent);
-  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 2px solid #ecf0f1; }
+  .tab { padding: 10px 22px; border: none; background: transparent; cursor: pointer; font-size: 15px; color: #7f8c8d; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+  .tab.active { color: #3498db; font-weight: 600; border-bottom-color: #3498db; }
 
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 16px;
-    margin-bottom: 20px;
-  }
-  .card {
-    background: var(--card);
-    padding: 18px 22px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    transition: transform 0.15s, box-shadow 0.15s;
-  }
-  .card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(0,0,0,0.08);
-  }
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 20px; }
+  .card { background: #fff; padding: 18px 22px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
   .card .num { font-size: 30px; font-weight: 700; line-height: 1; }
-  .card .num.danger { color: var(--danger); }
-  .card .num.success { color: var(--success); }
-  .card .num.accent { color: var(--accent); }
-  .card .label { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .card .num.danger { color: #e74c3c; }
+  .card .num.success { color: #27ae60; }
+  .card .num.accent { color: #3498db; }
+  .card .label { color: #7f8c8d; font-size: 13px; margin-top: 8px; }
 
-  .charts {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 20px;
-  }
-  .chart-box {
-    background: var(--card);
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-  }
+  .charts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .chart-box { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
   .chart-box h3 { margin: 0 0 14px; font-size: 15px; font-weight: 600; }
-  .chart-box.full { margin-bottom: 20px; }
+  .two-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
 
-  .two-charts {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 20px;
-  }
-
-  .table-wrap {
-    background: var(--card);
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    overflow: hidden;
-  }
-  .table-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
+  .table-wrap { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden; }
+  .table-header { padding: 16px 20px; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between; align-items: center; }
   .table-header h3 { margin: 0; font-size: 15px; }
-  .table-header .right { display: flex; align-items: center; gap: 12px; }
-  .table-header .count { color: var(--muted); font-size: 13px; }
+  .table-header .count { color: #7f8c8d; font-size: 13px; }
 
-  .filter-btns {
-    display: flex;
-    gap: 6px;
-    background: #f1f3f5;
-    border-radius: 8px;
-    padding: 3px;
-  }
-  .filter-btn {
-    padding: 5px 14px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--muted);
-    border-radius: 6px;
-    transition: all 0.15s;
-  }
-  .filter-btn:hover { color: var(--text); }
-  .filter-btn.active {
-    background: #fff;
-    color: var(--text);
-    font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  }
+  .filter-btns { display: flex; gap: 6px; background: #f1f3f5; border-radius: 8px; padding: 3px; }
+  .filter-btn { padding: 5px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px; color: #7f8c8d; border-radius: 6px; }
+  .filter-btn.active { background: #fff; color: #1f2d3d; font-weight: 600; }
 
   table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  th, td {
-    padding: 12px 16px;
-    text-align: left;
-    font-size: 13px;
-    border-bottom: 1px solid var(--border);
-  }
+  th, td { padding: 12px 16px; text-align: left; font-size: 13px; border-bottom: 1px solid #ecf0f1; }
   th:nth-child(1), td:nth-child(1) { width: 180px; }
   th:nth-child(3), td:nth-child(3) { width: 80px; }
   th:nth-child(4), td:nth-child(4) { width: 160px; }
-  th {
-    background: #fafbfc;
-    font-weight: 600;
-    color: #555;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
+  th { background: #fafbfc; color: #555; font-weight: 600; font-size: 12px; }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #fafbfc; }
 
-  .cmd-cell {
-    display: block;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 12px;
-    color: #2c3e50;
-    background: #f4f6f8;
-    padding: 4px 8px;
-    border-radius: 4px;
-    cursor: help;
-  }
+  .cmd-cell { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px; background: #f4f6f8; padding: 4px 8px; border-radius: 4px; }
 
-  .code-badge {
-    display: inline-block;
-    min-width: 36px;
-    text-align: center;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 600;
-  }
+  .code-badge { display: inline-block; min-width: 36px; text-align: center; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
   .code-badge.error { background: #fdecea; color: #c0392b; }
   .code-badge.success { background: #eafaf1; color: #27ae60; }
-
-  .reason-badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 10px;
-    font-size: 12px;
-    white-space: nowrap;
-  }
+  .reason-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; }
   .reason-badge.error { background: #eaf3fb; color: #2980b9; }
   .reason-badge.success { background: #eafaf1; color: #27ae60; }
-
-  .empty {
-    padding: 60px 20px;
-    text-align: center;
-    color: var(--muted);
-    font-size: 14px;
-  }
+  .empty { padding: 60px 20px; text-align: center; color: #7f8c8d; }
 </style>
 </head>
 <body>
@@ -275,35 +134,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   </div>
 
   <div class="charts">
-    <div class="chart-box">
-      <h3>报错趋势</h3>
-      <canvas id="dayChart"></canvas>
-    </div>
-    <div class="chart-box">
-      <h3>成功 vs 失败</h3>
-      <canvas id="statusChart"></canvas>
-    </div>
-    <div class="chart-box">
-      <h3>错误类型分布</h3>
-      <canvas id="typeChart"></canvas>
-    </div>
+    <div class="chart-box"><h3>报错趋势</h3><canvas id="dayChart"></canvas></div>
+    <div class="chart-box"><h3>成功 vs 失败</h3><canvas id="statusChart"></canvas></div>
+    <div class="chart-box"><h3>错误类型分布</h3><canvas id="typeChart"></canvas></div>
   </div>
 
   <div class="two-charts">
-    <div class="chart-box">
-      <h3>最常使用的命令 Top 10</h3>
-      <canvas id="usageChart"></canvas>
-    </div>
-    <div class="chart-box">
-      <h3>最常报错的命令 Top 10</h3>
-      <canvas id="cmdChart"></canvas>
-    </div>
+    <div class="chart-box"><h3>最常使用的命令 Top 10</h3><canvas id="usageChart"></canvas></div>
+    <div class="chart-box"><h3>最常报错的命令 Top 10</h3><canvas id="cmdChart"></canvas></div>
   </div>
 
   <div class="table-wrap">
     <div class="table-header">
       <h3>命令明细</h3>
-      <div class="right">
+      <div style="display:flex; gap:12px; align-items:center;">
         <div class="filter-btns">
           <button class="filter-btn active" data-filter="all">全部</button>
           <button class="filter-btn" data-filter="error">仅错误</button>
@@ -318,71 +162,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
 <script>
 const ALL_RECORDS = __DATA__;
-
 let dayChart, statusChart, typeChart, cmdChart, usageChart;
 let currentMode = 'today';
 let currentFilter = 'all';
 
 function pad(n) { return String(n).padStart(2, '0'); }
-
-function getTodayStr() {
-  const d = new Date();
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-}
-
-function getWeekStartStr() {
-  const d = new Date();
-  const day = d.getDay() || 7;
-  d.setDate(d.getDate() - day + 1);
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-}
+function getTodayStr() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function getWeekStartStr() { const d = new Date(); const day = d.getDay() || 7; d.setDate(d.getDate() - day + 1); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 
 function filterByTime(mode) {
-  if (mode === 'today') {
-    const today = getTodayStr();
-    return ALL_RECORDS.filter(r => r.date === today);
-  }
-  if (mode === 'week') {
-    const ws = getWeekStartStr();
-    return ALL_RECORDS.filter(r => r.date >= ws);
-  }
+  if (mode === 'today') { const t = getTodayStr(); return ALL_RECORDS.filter(r => r.date === t); }
+  if (mode === 'week') { const ws = getWeekStartStr(); return ALL_RECORDS.filter(r => r.date >= ws); }
   return ALL_RECORDS;
 }
 
-function countBy(arr, keyFn) {
-  const map = new Map();
-  arr.forEach(r => {
-    const k = keyFn(r);
-    map.set(k, (map.get(k) || 0) + 1);
-  });
-  return map;
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+function countBy(arr, keyFn) { const m = new Map(); arr.forEach(r => { const k = keyFn(r); m.set(k, (m.get(k) || 0) + 1); }); return m; }
+function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 function simplifyCommand(cmd) {
   if (!cmd) return '';
   let parts = cmd.trim().split(/\\s+/);
   if (parts.length === 0) return cmd;
-  if (parts[0] === 'sudo' && parts.length > 1) {
-    parts = parts.slice(1);
-  }
+  if (parts[0] === 'sudo' && parts.length > 1) parts = parts.slice(1);
   const base = parts[0];
-  // 二级命令：aws xxx / docker xxx / kubectl xxx / git xxx
   const twoLevel = ['aws', 'docker', 'kubectl', 'git', 'npm', 'pip', 'pip3', 'conda'];
   if (twoLevel.includes(base) && parts.length > 1) {
-    for (let i = 1; i < parts.length; i++) {
-      if (!parts[i].startsWith('-')) {
-        return base + ' ' + parts[i];
-      }
-    }
+    for (let i = 1; i < parts.length; i++) { if (!parts[i].startsWith('-')) return base + ' ' + parts[i]; }
     return base;
   }
   return base;
@@ -392,12 +197,10 @@ function renderCards(records) {
   const success = records.filter(r => r.exit_code === 0);
   const errors = records.filter(r => r.exit_code !== 0);
   const typeCounter = countBy(errors, r => r.reason);
-
   document.getElementById('card-total').textContent = records.length;
   document.getElementById('card-success').textContent = success.length;
   document.getElementById('card-error').textContent = errors.length;
-  const rate = records.length ? (success.length / records.length * 100).toFixed(1) + '%' : '0%';
-  document.getElementById('card-rate').textContent = rate;
+  document.getElementById('card-rate').textContent = records.length ? (success.length / records.length * 100).toFixed(1) + '%' : '0%';
   document.getElementById('card-types').textContent = typeCounter.size;
 }
 
@@ -410,156 +213,62 @@ function renderCharts(records) {
 
   const errors = records.filter(r => r.exit_code !== 0);
 
-  // 报错趋势
   const dayCounter = countBy(errors, r => r.date);
   const days = Array.from(dayCounter.keys()).sort();
   const dayVals = days.map(d => dayCounter.get(d));
-
   dayChart = new Chart(document.getElementById('dayChart'), {
     type: 'line',
-    data: {
-      labels: days.length ? days : ['无数据'],
-      datasets: [{
-        label: '报错次数',
-        data: dayVals.length ? dayVals : [0],
-        borderColor: '#e74c3c',
-        backgroundColor: 'rgba(231,76,60,0.12)',
-        fill: true,
-        tension: 0.3,
-        pointRadius: 4,
-        pointBackgroundColor: '#e74c3c'
-      }]
-    },
-    options: {
-      plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-    }
+    data: { labels: days.length ? days : ['无数据'], datasets: [{ label: '报错次数', data: dayVals.length ? dayVals : [0], borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.12)', fill: true, tension: 0.3, pointRadius: 4 }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
 
-  // 成功 vs 失败
-  const successCount = records.filter(r => r.exit_code === 0).length;
-  const errorCount = records.length - successCount;
-
+  const sc = records.filter(r => r.exit_code === 0).length;
+  const ec = records.length - sc;
   statusChart = new Chart(document.getElementById('statusChart'), {
     type: 'doughnut',
-    data: {
-      labels: ['成功', '失败'],
-      datasets: [{
-        data: [successCount, errorCount],
-        backgroundColor: ['#27ae60', '#e74c3c']
-      }]
-    },
+    data: { labels: ['成功', '失败'], datasets: [{ data: [sc, ec], backgroundColor: ['#27ae60', '#e74c3c'] }] },
     options: { plugins: { legend: { position: 'bottom' } } }
   });
 
-  // 错误类型
   const typeCounter = countBy(errors, r => r.reason);
   const types = Array.from(typeCounter.entries()).sort((a, b) => b[1] - a[1]);
-  const typeLabels = types.map(t => t[0]);
-  const typeVals = types.map(t => t[1]);
-
   typeChart = new Chart(document.getElementById('typeChart'), {
     type: 'doughnut',
-    data: {
-      labels: typeLabels.length ? typeLabels : ['无错误'],
-      datasets: [{
-        data: typeVals.length ? typeVals : [1],
-        backgroundColor: typeLabels.length ?
-          ['#e74c3c','#e67e22','#f1c40f','#3498db','#9b59b6','#1abc9c','#34495e','#95a5a6'] :
-          ['#ecf0f1']
-      }]
-    },
-    options: {
-      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } }
-    }
+    data: { labels: types.length ? types.map(t => t[0]) : ['无错误'], datasets: [{ data: types.length ? types.map(t => t[1]) : [1], backgroundColor: types.length ? ['#e74c3c','#e67e22','#f1c40f','#3498db','#9b59b6','#1abc9c','#34495e','#95a5a6'] : ['#ecf0f1'] }] },
+    options: { plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } } }
   });
 
-  // 最常使用的命令 Top 10（按简化命令名）
   const usageCounter = countBy(records, r => simplifyCommand(r.command));
   const usages = Array.from(usageCounter.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const usageLabels = usages.map(u => u[0]);
-  const usageVals = usages.map(u => u[1]);
-
   usageChart = new Chart(document.getElementById('usageChart'), {
     type: 'bar',
-    data: {
-      labels: usageLabels.length ? usageLabels : ['无数据'],
-      datasets: [{
-        label: '使用次数',
-        data: usageVals.length ? usageVals : [0],
-        backgroundColor: '#3498db',
-        borderRadius: 4
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
-    }
+    data: { labels: usages.length ? usages.map(u => u[0]) : ['无数据'], datasets: [{ label: '使用次数', data: usages.length ? usages.map(u => u[1]) : [0], backgroundColor: '#3498db', borderRadius: 4 }] },
+    options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
 
-  // 最常报错的命令 Top 10（按简化命令名）
   const cmdCounter = countBy(errors, r => simplifyCommand(r.command));
   const cmds = Array.from(cmdCounter.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const cmdLabels = cmds.map(c => c[0]);
-  const cmdVals = cmds.map(c => c[1]);
-
   cmdChart = new Chart(document.getElementById('cmdChart'), {
     type: 'bar',
-    data: {
-      labels: cmdLabels.length ? cmdLabels : ['无数据'],
-      datasets: [{
-        label: '报错次数',
-        data: cmdVals.length ? cmdVals : [0],
-        backgroundColor: '#e74c3c',
-        borderRadius: 4
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
-    }
+    data: { labels: cmds.length ? cmds.map(c => c[0]) : ['无数据'], datasets: [{ label: '报错次数', data: cmds.length ? cmds.map(c => c[1]) : [0], backgroundColor: '#e74c3c', borderRadius: 4 }] },
+    options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
 }
 
 function renderTable(records) {
   const container = document.getElementById('table-container');
   const count = document.getElementById('table-count');
-
   let filtered = records;
-  if (currentFilter === 'error') {
-    filtered = records.filter(r => r.exit_code !== 0);
-  } else if (currentFilter === 'success') {
-    filtered = records.filter(r => r.exit_code === 0);
-  }
-
+  if (currentFilter === 'error') filtered = records.filter(r => r.exit_code !== 0);
+  else if (currentFilter === 'success') filtered = records.filter(r => r.exit_code === 0);
   count.textContent = filtered.length + ' 条';
-
-  if (filtered.length === 0) {
-    container.innerHTML = '<div class="empty">该范围内没有命令记录</div>';
-    return;
-  }
-
-  const rows = filtered
-    .slice()
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    .map(r => {
-      const cmd = escapeHtml(r.command);
-      const status = r.exit_code === 0 ? 'success' : 'error';
-      return '<tr>' +
-        '<td>' + r.timestamp + '</td>' +
-        '<td><span class="cmd-cell" title="' + cmd + '">' + cmd + '</span></td>' +
-        '<td><span class="code-badge ' + status + '">' + r.exit_code + '</span></td>' +
-        '<td><span class="reason-badge ' + status + '">' + escapeHtml(r.reason) + '</span></td>' +
-        '</tr>';
-    }).join('');
-
-  container.innerHTML =
-    '<table>' +
-    '<thead><tr><th>时间</th><th>命令</th><th>退出码</th><th>原因</th></tr></thead>' +
-    '<tbody>' + rows + '</tbody>' +
-    '</table>';
+  if (filtered.length === 0) { container.innerHTML = '<div class="empty">该范围内没有命令记录</div>'; return; }
+  const rows = filtered.slice().sort((a, b) => b.timestamp.localeCompare(a.timestamp)).map(r => {
+    const cmd = escapeHtml(r.command);
+    const status = r.exit_code === 0 ? 'success' : 'error';
+    return '<tr><td>' + r.timestamp + '</td><td><span class="cmd-cell" title="' + cmd + '">' + cmd + '</span></td><td><span class="code-badge ' + status + '">' + r.exit_code + '</span></td><td><span class="reason-badge ' + status + '">' + escapeHtml(r.reason) + '</span></td></tr>';
+  }).join('');
+  container.innerHTML = '<table><thead><tr><th>时间</th><th>命令</th><th>退出码</th><th>原因</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 function render() {
@@ -601,21 +310,19 @@ def build_html(records):
 
 
 def main():
-    os.makedirs(REPORT_DIR, exist_ok=True)
     records = [item_to_dict(i) for i in scan_all()]
     html = build_html(records)
 
-    local_path = os.path.join(REPORT_DIR, 'index.html')
+    local_path = REPORT_DIR / 'index.html'
     with open(local_path, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"HTML 报告已更新: {local_path}")
     print(f"记录数: {len(records)}")
 
-    client = boto3.client('s3', endpoint_url=ENDPOINT,
-                          region_name=REGION, **CREDS)
+    client = boto3.client('s3', endpoint_url=ENDPOINT, region_name=REGION, **CREDS)
     key = 'reports/index.html'
     try:
-        client.upload_file(local_path, S3_BUCKET, key)
+        client.upload_file(str(local_path), S3_BUCKET, key)
         print(f"已上传 S3: s3://{S3_BUCKET}/{key}")
     except Exception as ex:
         print(f"S3 上传失败: {ex}")
