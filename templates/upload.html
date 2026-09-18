@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>综测成绩评定</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #eef1f5; margin: 0; min-height: 100vh; padding: 40px 16px; color: #1f2d3d; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  .hero { background: linear-gradient(135deg, #3498db 0%, #2c3e50 100%); color: #fff; padding: 26px 30px; border-radius: 14px; box-shadow: 0 6px 20px rgba(52,152,219,0.25); margin-bottom: 22px; }
+  .hero h1 { font-size: 26px; margin: 0 0 6px; }
+  .hero p { margin: 0; color: rgba(255,255,255,0.85); font-size: 14px; }
+
+  .panel { background: #fff; padding: 26px 30px; border-radius: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+
+  .drop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+
+  .drop-zone { position: relative; border: 2px dashed #cbd5e0; border-radius: 12px; padding: 30px 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fafbfc; }
+  .drop-zone:hover { border-color: #3498db; background: #f5faff; }
+  .drop-zone.dragover { border-color: #3498db; background: #eaf3fb; transform: scale(1.01); }
+  .drop-zone.has-file { border-color: #27ae60; background: #f5fdf8; }
+  .dz-icon { font-size: 40px; line-height: 1; margin-bottom: 10px; }
+  .dz-title { font-size: 15px; font-weight: 600; color: #2c3e50; margin-bottom: 6px; }
+  .dz-hint { font-size: 12px; color: #95a5a6; }
+  .dz-file { margin-top: 12px; font-size: 12px; color: #27ae60; font-family: monospace; word-break: break-all; min-height: 16px; }
+
+  .submit-row { text-align: center; }
+  button { padding: 12px 40px; border: none; background: #3498db; color: #fff; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  button:hover:not(:disabled) { background: #2980b9; transform: translateY(-1px); }
+  button:disabled { background: #bdc3c7; cursor: not-allowed; }
+
+  #status { margin-top: 20px; font-size: 14px; color: #555; text-align: center; min-height: 20px; font-weight: 500; }
+  #status.error { color: #c0392b; }
+  #status.success { color: #27ae60; }
+
+  #log { display: none; margin-top: 16px; background: #1e272e; color: #d2dae2; padding: 16px; border-radius: 10px; font-family: "SF Mono", Menlo, monospace; font-size: 12px; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <h1>综测成绩评定</h1>
+    <p>拖入两个 Excel 文件 → 自动计算 → 生成 HTML 报告</p>
+  </div>
+
+  <div class="panel">
+    <div class="drop-grid">
+      <div class="drop-zone" data-year="2025">
+        <div class="dz-icon">📄</div>
+        <div class="dz-title">秋季学期</div>
+        <div class="dz-hint">拖入 .xlsx 或点击选择</div>
+        <div class="dz-file"></div>
+        <input type="file" accept=".xlsx" style="display:none" data-year="2025">
+      </div>
+      <div class="drop-zone" data-year="2026">
+        <div class="dz-icon">📄</div>
+        <div class="dz-title">春季学期</div>
+        <div class="dz-hint">拖入 .xlsx 或点击选择</div>
+        <div class="dz-file"></div>
+        <input type="file" accept=".xlsx" style="display:none" data-year="2026">
+      </div>
+    </div>
+
+    <div class="submit-row">
+      <button id="submitBtn" disabled>开始评定</button>
+    </div>
+
+    <div id="status"></div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const files = { '2025': null, '2026': null };
+const zones = document.querySelectorAll('.drop-zone');
+
+function updateBtn() {
+  const ok = files['2025'] && files['2026'];
+  document.getElementById('submitBtn').disabled = !ok;
+}
+
+zones.forEach(zone => {
+  const year = zone.dataset.year;
+  const input = document.querySelector('input[data-year="' + year + '"]');
+  const fileLabel = zone.querySelector('.dz-file');
+
+  zone.addEventListener('click', () => input.click());
+
+  zone.addEventListener('dragover', e => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) setFile(year, f);
+  });
+
+  input.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) setFile(year, f);
+  });
+
+  function setFile(y, f) {
+    if (!f.name.toLowerCase().endsWith('.xlsx')) {
+      alert('请选择 .xlsx 文件');
+      return;
+    }
+    files[y] = f;
+    fileLabel.textContent = '✓ ' + f.name;
+    zone.classList.add('has-file');
+    updateBtn();
+  }
+});
+
+document.getElementById('submitBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('submitBtn');
+  const status = document.getElementById('status');
+  const log = document.getElementById('log');
+
+  btn.disabled = true;
+  status.className = '';
+  status.textContent = '正在处理...';
+  log.style.display = 'none';
+  log.textContent = '';
+
+  const fd = new FormData();
+  fd.append('file2025', files['2025']);
+  fd.append('file2026', files['2026']);
+
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+
+    if (data.ok) {
+      status.className = 'success';
+      status.textContent = '✓ 评定完成！3 秒后跳转到报告...';
+      if (data.log) {
+        log.style.display = 'block';
+        log.textContent = data.log;
+      }
+      setTimeout(() => { window.location.href = '/awards.html'; }, 3000);
+    } else {
+      status.className = 'error';
+      status.textContent = '✗ ' + (data.msg || '处理失败');
+      if (data.log) {
+        log.style.display = 'block';
+        log.textContent = data.log;
+      }
+      btn.disabled = false;
+    }
+  } catch (e) {
+    status.className = 'error';
+    status.textContent = '✗ 网络错误: ' + e.message;
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

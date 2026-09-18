@@ -1,0 +1,29 @@
+# AWS 配置
+aws:
+  # LocalStack 用 http://localhost:4566
+  # 真实 AWS 留空即可（自动用官方地址）
+  endpoint_url: "http://localhost:4566"
+  region: "us-east-1"
+  # LocalStack 随便填，真实 AWS 别写在这里，用 ~/.aws/credentials
+  access_key_id: "test"
+  secret_access_key: "test"
+
+# 存储
+storage:
+  dynamodb_table: "AuditLogs"
+  s3_bucket: "audit-reports-2026"
+
+# 本地路径
+paths:
+  log_dir: "/root/audit_logs"
+  report_dir: "/root/audit_logs/reports"
+  commands_log: "/root/audit_logs/commands.log"
+
+# 服务
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+# 自动刷新
+refresh:
+  interval_seconds: 60
