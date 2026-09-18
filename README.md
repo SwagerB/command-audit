@@ -24,13 +24,29 @@
 浏览器打开 `http://localhost:8000`
 
 ## 项目结构
+## 项目结构
+
+```
 command-audit/
-├── src/ 核心 Python 脚本
-├── scripts/ shell 启动脚本
-├── templates/ HTML 模板
-├── requirements.txt
-├── config.example.yaml
-└── README.md
+├── src/                        核心 Python 脚本
+│   ├── audit.py                采集命令 + 写入 DynamoDB
+│   ├── generate_report.py      生成 HTML 报告 + 上传 S3
+│   ├── query_audit.py          命令行查询接口
+│   └── app.py                  Flask 后端（拖拽上传 + 文件服务）
+├── scripts/                    shell 启动脚本
+│   ├── audit_setup.sh          命令记录配置（写入 .bashrc）
+│   ├── start_audit.sh          一键启动 HTTP + 自动刷新
+│   └── auto_refresh.sh         定时刷新任务
+├── templates/                  HTML 模板
+│   └── upload.html             拖拽上传页面
+├── docs/                       文档与截图
+│   └── screenshots/
+├── requirements.txt            Python 依赖
+├── config.example.yaml         配置模板
+├── .gitignore                  Git 忽略规则
+├── LICENSE                     MIT 协议
+└── README.md                   本文件
+```
 
 
 ## License
