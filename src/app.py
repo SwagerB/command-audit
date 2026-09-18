@@ -1,59 +1,57 @@
-from flask import Flask, request, send_from_directory, jsonify, Response
+from flask import Flask, send_from_directory, jsonify, Response
+from pathlib import Path
 import subprocess
+import sys
 
 app = Flask(__name__)
 
-REPORT_DIR = '/root/audit_logs/reports'
-UPLOAD_PAGE = '/root/upload.html'
+# ============ 路径 ============
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / 'data'
+REPORT_DIR = DATA_DIR / 'reports'
+SRC_DIR = PROJECT_ROOT / 'src'
 
-FILE_2025 = '/root/23级2025年秋季学期综测成绩.xlsx'
-FILE_2026 = '/root/23级2026年春季学期综测成绩.xlsx'
+REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @app.route('/')
 def index():
-    with open(UPLOAD_PAGE, 'r', encoding='utf-8') as f:
-        return Response(f.read(), mimetype='text/html')
-
-
-@app.route('/upload', methods=['POST'])
-def upload():
-    f2025 = request.files.get('file2025')
-    f2026 = request.files.get('file2026')
-    if not f2025 or not f2026:
-        return jsonify({'ok': False, 'msg': '请上传两个文件'}), 400
-
-    f2025.save(FILE_2025)
-    f2026.save(FILE_2026)
-
-    r1 = subprocess.run(['python3', '/root/award_filter.py'],
-                        capture_output=True, text=True)
-    if r1.returncode != 0:
-        return jsonify({
-            'ok': False,
-            'msg': 'award_filter.py 执行失败',
-            'log': r1.stdout + '\n' + r1.stderr
-        }), 500
-
-    r2 = subprocess.run(['python3', '/root/awards_report.py'],
-                        capture_output=True, text=True)
-    if r2.returncode != 0:
-        return jsonify({
-            'ok': False,
-            'msg': 'awards_report.py 执行失败',
-            'log': r2.stdout + '\n' + r2.stderr
-        }), 500
-
-    return jsonify({
-        'ok': True,
-        'log': r1.stdout + '\n' + r2.stdout
-    })
+    """首页：直接显示审计报告"""
+    return send_from_directory(str(REPORT_DIR), 'index.html')
 
 
 @app.route('/<path:filename>')
 def static_files(filename):
-    return send_from_directory(REPORT_DIR, filename)
+    """提供 data/reports/ 下的静态文件"""
+    return send_from_directory(str(REPORT_DIR), filename)
+
+
+@app.route('/refresh', methods=['POST', 'GET'])
+def refresh():
+    """手动触发一次刷新：跑 audit.py + generate_report.py"""
+    try:
+        r1 = subprocess.run(
+            [sys.executable, str(SRC_DIR / 'audit.py')],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+        )
+        r2 = subprocess.run(
+            [sys.executable, str(SRC_DIR / 'generate_report.py')],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+        )
+        return jsonify({
+            'ok': r1.returncode == 0 and r2.returncode == 0,
+            'audit_output': r1.stdout[-1000:],
+            'report_output': r2.stdout[-1000:],
+            'errors': (r1.stderr + r2.stderr)[-1000:],
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 500
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000, debug=False)
+    import os
+    host = os.getenv('APP_HOST', '0.0.0.0')
+    port = int(os.getenv('APP_PORT', '8000'))
+    print(f"服务启动: http://localhost:{port}")
+    print(f"报告目录: {REPORT_DIR}")
+    app.run(host=host, port=port, debug=False)
