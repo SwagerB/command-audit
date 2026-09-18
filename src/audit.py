@@ -1,16 +1,28 @@
 import os
 import boto3
+from pathlib import Path
 from datetime import datetime
 from collections import Counter
 
-LOG_FILE = '/root/audit_logs/commands.log'
-REPORT_DIR = '/root/audit_logs/reports'
-DDB_TABLE = 'AuditLogs'
-S3_BUCKET = 'audit-reports-2026'
+# ============ 路径（自动定位到项目根目录） ============
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / 'data'
+REPORT_DIR = DATA_DIR / 'reports'
+LOG_FILE = DATA_DIR / 'commands.log'
 
-ENDPOINT = 'http://localhost:4566'
-REGION = 'us-east-1'
-CREDS = dict(aws_access_key_id='test', aws_secret_access_key='test')
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+# ============ AWS 配置 ============
+ENDPOINT = os.getenv('AWS_ENDPOINT_URL', 'http://localhost:4566')
+REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+DDB_TABLE = os.getenv('AUDIT_DDB_TABLE', 'AuditLogs')
+S3_BUCKET = os.getenv('AUDIT_S3_BUCKET', 'audit-reports-2026')
+
+CREDS = dict(
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID', 'test'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY', 'test'),
+)
 
 EXIT_CODE_MAP = {
     1: '通用错误',
@@ -168,8 +180,7 @@ def save_to_dynamodb(records):
 
 
 def upload_report_to_s3(report_text):
-    os.makedirs(REPORT_DIR, exist_ok=True)
-    local_path = os.path.join(REPORT_DIR, 'audit_report.txt')
+    local_path = REPORT_DIR / 'audit_report.txt'
     with open(local_path, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
@@ -177,7 +188,7 @@ def upload_report_to_s3(report_text):
                           region_name=REGION, **CREDS)
     key = 'reports/audit_report.txt'
     try:
-        client.upload_file(local_path, S3_BUCKET, key)
+        client.upload_file(str(local_path), S3_BUCKET, key)
         print(f"报告已上传 S3: s3://{S3_BUCKET}/{key}")
     except Exception as ex:
         print(f"S3 上传失败: {ex}")
@@ -185,7 +196,7 @@ def upload_report_to_s3(report_text):
 
 
 if __name__ == '__main__':
-    records = parse_log(LOG_FILE)
+    records = parse_log(str(LOG_FILE))
     for r in records:
         if r['exit_code'] == 0:
             r['reason'] = '成功'
