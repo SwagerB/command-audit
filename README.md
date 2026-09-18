@@ -24,7 +24,6 @@
 浏览器打开 `http://localhost:8000`
 
 ## 项目结构
-## 项目结构
 
 ```
 command-audit/
