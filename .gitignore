@@ -33,3 +33,4 @@ Thumbs.db
 
 # LocalStack
 localstack-data/
+data/
