@@ -147,6 +147,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   .reason-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; }
   .reason-badge.error { background: #eaf3fb; color: #2980b9; }
   .reason-badge.success { background: #eafaf1; color: #27ae60; }
+  .table-foot { padding: 12px 16px; text-align: center; border-top: 1px solid #ecf0f1; background: #fafbfc; }
+  .expand-btn { padding: 6px 20px; border: 1px solid #dfe6ec; background: #fff; color: #3498db; font-size: 13px; border-radius: 16px; cursor: pointer; }
+  .expand-btn:hover { background: #eaf3fb; border-color: #3498db; }
   .empty { padding: 60px 20px; text-align: center; color: #7f8c8d; }
 </style>
 </head>
@@ -203,6 +206,8 @@ const ALL_RECORDS = __DATA__;
 let dayChart, statusChart, typeChart, cmdChart, usageChart;
 let currentMode = 'today';
 let currentFilter = 'all';
+let tableExpanded = false;
+const PAGE_SIZE = 15;
 
 function pad(n) { return String(n).padStart(2, '0'); }
 function getTodayStr() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -299,18 +304,36 @@ function renderTable(records) {
   let filtered = records;
   if (currentFilter === 'error') filtered = records.filter(r => r.exit_code !== 0);
   else if (currentFilter === 'success') filtered = records.filter(r => r.exit_code === 0);
-  count.textContent = filtered.length + ' 条';
-  if (filtered.length === 0) { container.innerHTML = '<div class="empty">该范围内没有命令记录</div>'; return; }
-  const rows = filtered.slice().sort((a, b) => b.timestamp.localeCompare(a.timestamp)).map(r => {
+  filtered = filtered.slice().sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+  const total = filtered.length;
+  const shown = tableExpanded ? total : Math.min(PAGE_SIZE, total);
+  count.textContent = (tableExpanded || total <= PAGE_SIZE) ? (total + ' 条') : (shown + ' / ' + total + ' 条');
+  if (total === 0) { container.innerHTML = '<div class="empty">该范围内没有命令记录</div>'; return; }
+
+  const rows = filtered.slice(0, shown).map(r => {
     const cmd = escapeHtml(r.command);
     const status = r.exit_code === 0 ? 'success' : 'error';
     return '<tr><td>' + r.timestamp + '</td><td><span class="cmd-cell" title="' + cmd + '">' + cmd + '</span></td><td><span class="code-badge ' + status + '">' + r.exit_code + '</span></td><td><span class="reason-badge ' + status + '">' + escapeHtml(r.reason) + '</span></td></tr>';
   }).join('');
-  container.innerHTML = '<table><thead><tr><th>时间</th><th>命令</th><th>退出码</th><th>原因</th></tr></thead><tbody>' + rows + '</tbody></table>';
+
+  let foot = '';
+  if (total > PAGE_SIZE) {
+    foot = tableExpanded
+      ? '<div class="table-foot"><button class="expand-btn" onclick="toggleTable(false)">收起，仅显示最新 ' + PAGE_SIZE + ' 条 ▴</button></div>'
+      : '<div class="table-foot"><button class="expand-btn" onclick="toggleTable(true)">展开全部 ' + total + ' 条 ▾</button></div>';
+  }
+  container.innerHTML = '<table><thead><tr><th>时间</th><th>命令</th><th>退出码</th><th>原因</th></tr></thead><tbody>' + rows + '</tbody></table>' + foot;
+}
+
+function toggleTable(v) {
+  tableExpanded = v;
+  renderTable(filterByTime(currentMode));
 }
 
 function render() {
   const records = filterByTime(currentMode);
+  tableExpanded = false;
   renderCards(records);
   renderCharts(records);
   renderTable(records);
