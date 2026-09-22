@@ -359,16 +359,20 @@ def main():
             return
         items = backup
 
-    # 表被重置（例如 LocalStack 重启）时自动回灌备份
-    if backup and len(items) < len(backup):
-        print(f"DynamoDB 记录数 {len(items)} < 本地备份 {len(backup)}，正在回灌…")
-        restored = restore_backup(backup)
-        print(f"已回灌 {restored} 条")
-        try:
-            items = scan_all()
-        except Exception as ex:
-            print(f"回灌后重扫失败，改用备份: {ex}")
-            items = backup
+    # 表被重置（例如 LocalStack 重启）时自动回灌备份。
+    # 只在“整表清空”或“丢了一大截(>20%)”时触发，
+    # 免得手工删掉几条记录又被自动救回来。
+    if backup:
+        lost = len(backup) - len(items)
+        if lost > 0 and (len(items) == 0 or lost >= max(1, int(len(backup) * 0.2))):
+            print(f"DynamoDB 记录数 {len(items)} < 本地备份 {len(backup)}，判定为数据丢失，正在回灌…")
+            restored = restore_backup(backup)
+            print(f"已回灌 {restored} 条")
+            try:
+                items = scan_all()
+            except Exception as ex:
+                print(f"回灌后重扫失败，改用备份: {ex}")
+                items = backup
 
     records = [item_to_dict(i) for i in items]
     save_backup(items)
