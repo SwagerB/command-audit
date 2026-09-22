@@ -34,3 +34,6 @@ Thumbs.db
 # LocalStack
 localstack-data/
 data/
+
+# WorkBuddy 工作区记忆
+.workbuddy/
