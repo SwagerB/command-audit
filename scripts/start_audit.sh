@@ -8,6 +8,13 @@ LOG_DIR="$PROJECT_ROOT/data"
 
 mkdir -p "$LOG_DIR"
 
+# 0. 优先使用项目自带 venv 的 Python（保证 boto3/flask 可用）
+if [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
+    export AUDIT_PYTHON="$PROJECT_ROOT/.venv/bin/python"
+else
+    export AUDIT_PYTHON="$(command -v python3)"
+fi
+
 # 1. 设置环境变量（默认适配 LocalStack，外部已设置的不覆盖）
 export AWS_ENDPOINT_URL="${AWS_ENDPOINT_URL:-http://localhost:4566}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
@@ -30,7 +37,7 @@ fi
 
 # 4. 启动 Flask 服务（如果没在跑）
 if ! pgrep -f "src/app.py" > /dev/null; then
-    nohup python3 "$PROJECT_ROOT/src/app.py" \
+    nohup "$AUDIT_PYTHON" "$PROJECT_ROOT/src/app.py" \
       > "$LOG_DIR/flask.log" 2>&1 &
     echo "✓ Flask 服务已启动"
 else
