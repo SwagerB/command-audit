@@ -94,7 +94,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="60">
 <title>命令审计报告</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
@@ -358,15 +357,26 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
 });
 
 render();
+
+// 数据版本探测：后台生成了新报告就整页重载，没有变化就不打扰
+// （替代旧的 meta refresh 60s 盲刷，标签/筛选/展开状态不再被定时重置）
+const GENERATED_AT = '__GENERATED_AT__';
+setInterval(function () {
+  fetch('report_meta.json?ts=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (m) {
+      if (m && m.generated_at && m.generated_at !== GENERATED_AT) location.reload();
+    })
+    .catch(function () {});
+}, 3000);
 </script>
 </body>
 </html>
 '''
 
 
-def build_html(records):
+def build_html(records, generated_at):
     data_json = json.dumps(records, ensure_ascii=False)
-    generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     return (HTML_TEMPLATE
             .replace('__DATA__', data_json)
             .replace('__GENERATED_AT__', generated_at)
@@ -427,13 +437,20 @@ def main():
     records = [item_to_dict(i) for i in items]
     save_backup(items)
 
-    html = build_html(records)
+    generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    html = build_html(records, generated_at)
 
     local_path = REPORT_DIR / 'index.html'
     with open(local_path, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"HTML 报告已更新: {local_path}")
     print(f"记录数: {len(records)}")
+
+    # 给页面的轮询探测用：浏览器每几秒拉一次这个小文件，
+    # generated_at 变了才整页重载，数据没变就不打扰。
+    with open(REPORT_DIR / 'report_meta.json', 'w', encoding='utf-8') as f:
+        json.dump({'generated_at': generated_at, 'records': len(records)},
+                  f, ensure_ascii=False)
 
     client = boto3.client('s3', endpoint_url=ENDPOINT, region_name=REGION, **CREDS)
     key = 'reports/index.html'
