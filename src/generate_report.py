@@ -22,9 +22,46 @@ CREDS = dict(
 )
 
 
+# DynamoDB 跑在 LocalStack 上，容器重启会丢数据。
+# 这里把扫描结果落到本地做备份，如果哪天表被清空就自动回灌。
+BACKUP_FILE = DATA_DIR / 'records_backup.json'
+
+
 def get_client():
     return boto3.client('dynamodb', endpoint_url=ENDPOINT,
                         region_name=REGION, **CREDS)
+
+
+def load_backup():
+    try:
+        with open(BACKUP_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_backup(items):
+    if not items:
+        return
+    tmp = BACKUP_FILE.with_name(BACKUP_FILE.name + '.tmp')
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(items, f, ensure_ascii=False)
+        tmp.replace(BACKUP_FILE)
+    except Exception as ex:
+        print(f"本地备份写入失败: {ex}")
+
+
+def restore_backup(backup):
+    client = get_client()
+    done = 0
+    for item in backup:
+        try:
+            client.put_item(TableName=DDB_TABLE, Item=item)
+            done += 1
+        except Exception as ex:
+            print(f"回灌失败: {ex}")
+    return done
 
 
 def scan_all():
@@ -310,7 +347,32 @@ def build_html(records):
 
 
 def main():
-    records = [item_to_dict(i) for i in scan_all()]
+    backup = load_backup()
+
+    try:
+        items = scan_all()
+    except Exception as ex:
+        # DynamoDB 连不上时，退化成用本地备份出报告，页面不至于变空
+        print(f"DynamoDB 不可用: {ex}")
+        if not backup:
+            print("没有本地备份，保留上一版报告不覆盖。")
+            return
+        items = backup
+
+    # 表被重置（例如 LocalStack 重启）时自动回灌备份
+    if backup and len(items) < len(backup):
+        print(f"DynamoDB 记录数 {len(items)} < 本地备份 {len(backup)}，正在回灌…")
+        restored = restore_backup(backup)
+        print(f"已回灌 {restored} 条")
+        try:
+            items = scan_all()
+        except Exception as ex:
+            print(f"回灌后重扫失败，改用备份: {ex}")
+            items = backup
+
+    records = [item_to_dict(i) for i in items]
+    save_backup(items)
+
     html = build_html(records)
 
     local_path = REPORT_DIR / 'index.html'

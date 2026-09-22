@@ -73,7 +73,9 @@ aws --endpoint-url=http://localhost:4566 s3 mb s3://audit-reports-2026
 bash scripts/start_audit.sh
 ```
 
-脚本会自动设置环境变量、启用命令记录、启动后台服务。
+脚本会自动：设置环境变量 → 安装命令记录钩子（写入 `~/.zshrc` / `~/.bashrc`）→ 启动自动刷新 + Flask 服务。
+
+> **新开一个终端**（或 `source ~/.zshrc`）后，命令记录才会在你日常用的终端里生效。
 
 ### 6. 打开报告
 
@@ -83,21 +85,66 @@ bash scripts/start_audit.sh
 http://localhost:8000
 ```
 
+页面每 60 秒自动刷新一次（与后台刷新节奏一致）。
+
+### 7. （推荐）交给系统托管
+
+`nohup` 启动的进程在关掉终端 / 重启后就没了，页面就会“不刷新”。用 macOS 自带的 launchd 托管即可开机自启、崩溃自动拉起：
+
+```bash
+bash scripts/install_daemons.sh     # 安装并启动（幂等，可重复执行）
+bash scripts/uninstall_daemons.sh   # 卸载
+launchctl list | grep commandaudit  # 查看状态
+```
+
+## 命令记录原理
+
+`scripts/audit_setup.sh` 同时兼容两种 shell，被 source 后注册钩子：
+
+| shell | 钩子 | 说明 |
+|---|---|---|
+| zsh | `preexec` + `precmd` | 分别取“命令原文”和“退出码”，放在钩子数组首位以免 `$?` 被其它插件覆盖 |
+| bash | `PROMPT_COMMAND` | `history 1` 取上一条命令 + `$?` |
+
+每条记录写成一行追加到 `data/commands.log`：
+
+```
+2026-09-22 11:26:14|0|uptime
+```
+
+格式为 `时间|退出码|命令`。重复 source 不会重复注册，且不会记录钩子自身的命令。
+
+安装 / 更新钩子（幂等，会先删旧块再写新块）：
+
+```bash
+bash scripts/install_hooks.sh
+```
+
+## 数据可靠性
+
+- DynamoDB 跑在 LocalStack 上，容器重启会丢数据；
+- 每次刷新会把全量记录备份到 `data/records_backup.json`；
+- 如果发现表里的记录数少于备份，会自动回灌，页面不会一夜之间被清空。
+
 ## 项目结构
 
 ```
 command-audit/
 ├── src/                        核心 Python 脚本
 │   ├── audit.py                采集命令 + 写入 DynamoDB
-│   ├── generate_report.py      生成 HTML 报告 + 上传 S3
+│   ├── generate_report.py      生成 HTML 报告 + 本地备份 + 上传 S3
 │   ├── query_audit.py          命令行查询接口
 │   └── app.py                  Flask 后端（提供报告 Web 服务）
 ├── scripts/                    shell 脚本
-│   ├── audit_setup.sh          命令记录配置（写入 .bashrc）
-│   ├── start_audit.sh          一键启动（含环境变量配置）
-│   └── auto_refresh.sh         定时刷新任务
+│   ├── audit_setup.sh          命令记录钩子（zsh / bash 双兼容）
+│   ├── install_hooks.sh        把钩子幂等写入 ~/.zshrc、~/.bashrc
+│   ├── start_audit.sh          一键启动（环境变量 + 钩子 + 服务）
+│   ├── auto_refresh.sh         定时刷新任务
+│   ├── install_daemons.sh      用 launchd 托管常驻服务
+│   └── uninstall_daemons.sh    卸载 launchd 托管
 ├── data/                       运行时生成（已 gitignore）
-│   ├── commands.log
+│   ├── commands.log            命令原始记录（时间|退出码|命令）
+│   ├── records_backup.json     全量记录本地备份（DynamoDB 的兜底）
 │   ├── reports/
 │   └── *.log
 ├── requirements.txt            Python 依赖
@@ -136,6 +183,13 @@ bash scripts/start_audit.sh
 ## 常用命令
 
 ```bash
+# 安装 / 更新命令记录钩子（写入 ~/.zshrc、~/.bashrc）
+bash scripts/install_hooks.sh
+
+# 一键启动（或交给 launchd 常驻）
+bash scripts/start_audit.sh
+bash scripts/install_daemons.sh
+
 # 手动刷新一次
 python3 src/audit.py
 python3 src/generate_report.py
@@ -145,6 +199,15 @@ python3 src/query_audit.py --today
 python3 src/query_audit.py --week
 python3 src/query_audit.py --type 命令未找到
 ```
+
+## 排障
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| 页面数字一直不变 | 先看 `data/commands.log` 有没有新行。没有 → 钩子没装，跑 `bash scripts/install_hooks.sh` 后**新开终端** |
+| 命令没被记录 | 确认当前 shell 已加载钩子：zsh 下 `echo $precmd_functions` 应包含 `__audit_precmd` |
+| 页面 404 / 打不开 | 服务没在跑：`bash scripts/start_audit.sh`，或 `launchctl list \| grep commandaudit` |
+| 记录数突然变少 | LocalStack 被重启过，`generate_report.py` 会自动用 `data/records_backup.json` 回灌 |
 
 ## License
 
