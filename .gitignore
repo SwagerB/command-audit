@@ -37,3 +37,6 @@ data/
 
 # WorkBuddy 工作区记忆
 .workbuddy/
+
+#这里是为了盖住对workbuddy文件夹的ignore那次commit，小编怕别人看到这个一下子觉得我全用ai弄的（其实是这样ovo）
+# I am Pretty Boy
