@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import boto3
 from pathlib import Path
 from datetime import datetime
@@ -153,7 +154,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 <div class="container">
   <header>
     <h1>命令审计报告</h1>
-    <div class="meta">生成时间: __GENERATED_AT__</div>
+    <div class="meta">生成时间: __GENERATED_AT__ ｜ 命令日志最后写入: __LAST_LOG__</div>
   </header>
 
   <div class="tabs">
@@ -343,7 +344,33 @@ render();
 def build_html(records):
     data_json = json.dumps(records, ensure_ascii=False)
     generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    return HTML_TEMPLATE.replace('__DATA__', data_json).replace('__GENERATED_AT__', generated_at)
+    return (HTML_TEMPLATE
+            .replace('__DATA__', data_json)
+            .replace('__GENERATED_AT__', generated_at)
+            .replace('__LAST_LOG__', last_log_html()))
+
+
+def last_log_html():
+    """命令日志最后写入时间 + 距今多久。页面上一眼分清是「没在记录」还是「页面没刷新」。"""
+    log_file = DATA_DIR / 'commands.log'
+    try:
+        age_min = int((time.time() - log_file.stat().st_mtime) / 60)
+        last = ''
+        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                if line.strip():
+                    last = line.strip()
+        ts = last.split('|', 1)[0] if last else '（日志为空）'
+        if age_min < 10:
+            color = '#27ae60'
+        elif age_min < 60:
+            color = '#e67e22'
+        else:
+            color = '#e74c3c'
+        return (f'<span style="color:{color};font-weight:600">{ts}'
+                f'（{age_min} 分钟前）</span>')
+    except OSError:
+        return '<span style="color:#e74c3c">暂无命令日志</span>'
 
 
 def main():
