@@ -126,6 +126,36 @@ bash scripts/install_hooks.sh
 - 每次刷新会把全量记录备份到 `data/records_backup.json`；
 - 如果发现表里的记录数少于备份，会自动回灌，页面不会一夜之间被清空。
 
+## 部署到 Linux 服务器
+
+核心链路（shell 钩子 → Python → LocalStack → Flask）全部跨平台，Linux 上开箱即用：
+
+```bash
+git clone git@github.com:SwagerB/command-audit.git && cd command-audit
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+bash scripts/start_audit.sh        # 钩子 + 自动刷新 + Flask 一键起
+```
+
+与 macOS 的差异只有常驻方式：Linux 没有 launchd，用 **systemd** 托管（效果等同，崩溃自动拉起、开机自启）：
+
+```ini
+# /etc/systemd/system/command-audit-web.service
+[Unit]
+Description=command-audit web
+After=network.target docker.service
+
+[Service]
+WorkingDirectory=/opt/command-audit
+ExecStart=/opt/command-audit/.venv/bin/python src/app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`auto_refresh` 同理再建一个 service（`ExecStart` 指向 `bash scripts/auto_refresh.sh`）。
+然后 `systemctl enable --now command-audit-web`。脚本里的端口检测在 Linux 上自动走 `ss`（没装 lsof 也能用）。
+
 ## 项目结构
 
 ```

@@ -55,6 +55,10 @@ fi
 if [ -f "$HOME/.bashrc" ]; then
     TARGETS+=("$HOME/.bashrc")
 fi
+# Linux 上 bash 登录 shell 读 .bash_profile 而不是 .bashrc，有就一起装（各自幂等）
+if [ -f "$HOME/.bash_profile" ]; then
+    TARGETS+=("$HOME/.bash_profile")
+fi
 if [ ${#TARGETS[@]} -eq 0 ]; then
     TARGETS+=("$HOME/.zshrc")
 fi

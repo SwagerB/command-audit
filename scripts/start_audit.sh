@@ -43,8 +43,19 @@ else
 fi
 
 # ---------- 4. Flask 服务 ----------
+# 端口检测：Linux 优先 ss，macOS 用 lsof，都没有就跳过检测
+port_in_use() {
+    if command -v ss > /dev/null 2>&1; then
+        ss -ltn 2>/dev/null | grep -q ":${1}[[:space:]]"
+    elif command -v lsof > /dev/null 2>&1; then
+        lsof -nP -iTCP:"$1" -sTCP:LISTEN > /dev/null 2>&1
+    else
+        return 1
+    fi
+}
+
 if ! pgrep -f "$PROJECT_ROOT/src/app.py" > /dev/null 2>&1; then
-    if lsof -nP -iTCP:"${APP_PORT:-8000}" -sTCP:LISTEN > /dev/null 2>&1; then
+    if port_in_use "${APP_PORT:-8000}"; then
         echo "⚠ 端口 ${APP_PORT:-8000} 已被占用，Flask 未启动（可能是另一个副本在跑）"
     else
         nohup "$AUDIT_PYTHON" "$PROJECT_ROOT/src/app.py" \
